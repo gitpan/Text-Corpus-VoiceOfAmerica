@@ -1,0 +1,114 @@
+NAME
+    "Text::Corpus::VoiceOfAmerica::Document" - Parse a VOA article for
+    research.
+
+SYNOPSIS
+      use Cwd;
+      use File::Spec;
+      use Text::Corpus::VoiceOfAmerica;
+      use Data::Dump qw(dump);
+      use Log::Log4perl qw(:easy);
+      Log::Log4perl->easy_init ($INFO);
+      my $corpusDirectory = File::Spec->catfile (getcwd(), 'corpus_voa');
+      my $corpus = Text::Corpus::VoiceOfAmerica->new (corpusDirectory => $corpusDirectory);
+      $corpus->update (verbose => 1);
+      my $document = $corpus->getDocument (index => 0);
+      dump $document->getBody;
+      dump $document->getCategories;
+      dump $document->getContent;
+      dump $document->getDate;
+      dump $document->getDescription;
+      dump $document->getTitle;
+      dump $document->getUri;
+
+DESCRIPTION
+    "Text::Corpus::VoiceOfAmerica::Document" provides methods for accessing
+    the content of VOA news articles for the researching and testing of
+    information processing techniques. Read the Voice of America's Terms of
+    Use statement to ensure you abide by it when using this module.
+
+CONSTRUCTOR
+  "new"
+    The constructor "new" creates an instance of the
+    "Text::Corpus::VoiceOfAmerica::Document" class with the following
+    parameters:
+
+    "htmlContent"
+          htmlContent => '...'
+
+        "htmlContent" is a string of the HTML of the document to be parsed.
+
+    "uri"
+          uri => '...'
+
+        "url" is the URL of the HTML content provided by "htmlContent"; it
+        is also returned as the documents unique identifier by "getUri".
+
+METHODS
+  "getBody"
+     getBody ()
+
+    "getBody" returns an array reference of strings of sentences that are
+    the body of the article.
+
+  "getCategories"
+      getCategories ()
+
+    "getCategories" returns an array reference of strings of categories
+    assigned to the article. They are the phrases and words from the
+    "/html/head/meta[@name="KEYWORDS"]" field in the HTML of the document.
+
+  "getContent"
+     getContent ()
+
+    "getContent" returns an array reference of strings of sentences that
+    form the content of the article, the title and body of the article.
+
+  "getDate"
+     getDate (format => '%g')
+
+    "getDate" returns the date and time of the article in the format
+    speficied by "format" that uses the print directives of
+    Date::Manip::Date. The default is to return the date and time in RFC2822
+    format.
+
+  "getDescription"
+      getDescription ()
+
+    "getDescription" returns an array reference of strings of sentences,
+    usually one, that describes the articles content. It is from the
+    "/html/head/meta[@name="description"]" field in the HTML of the
+    document.
+
+  "getTitle"
+     getTitle ()
+
+    "getTitle" returns an array reference of strings, usually one, of the
+    title of the article.
+
+  "getUri"
+      getUri ()
+
+    "getUri" returns the URL of the document.
+
+INSTALLATION
+    For installation instructions see Text::Corpus::VoiceOfAmerica.
+
+AUTHOR
+     Jeff Kubina<jeff.kubina@gmail.com>
+
+COPYRIGHT
+    Copyright (c) 2009 Jeff Kubina. All rights reserved. This program is
+    free software; you can redistribute it and/or modify it under the same
+    terms as Perl itself.
+
+    The full text of the license can be found in the LICENSE file included
+    with this module.
+
+KEYWORDS
+    information processing, english corpus, voa, voice of america
+
+SEE ALSO
+    CHI, HTML::TreeBuilder::XPath, Lingua::EN::Sentence, Log::Log4perl,
+    Text::Corpus::VoiceOfAmerica
+
