@@ -1,17 +1,17 @@
 NAME
-    "Text::Corpus::VoiceOfAmerica::Document" - Parse a VOA article for
+    "Text::Corpus::VoiceOfAmerica" - Make a corpus of VOA documents for
     research.
 
 SYNOPSIS
       use Cwd;
       use File::Spec;
-      use Text::Corpus::VoiceOfAmerica;
       use Data::Dump qw(dump);
       use Log::Log4perl qw(:easy);
+      use Text::Corpus::VoiceOfAmerica;
       Log::Log4perl->easy_init ($INFO);
       my $corpusDirectory = File::Spec->catfile (getcwd(), 'corpus_voa');
       my $corpus = Text::Corpus::VoiceOfAmerica->new (corpusDirectory => $corpusDirectory);
-      $corpus->update (verbose => 1);
+      $corpus->update (testing => 1, verbose => 1);
       my $document = $corpus->getDocument (index => 0);
       dump $document->getBody;
       dump $document->getCategories;
@@ -22,77 +22,165 @@ SYNOPSIS
       dump $document->getUri;
 
 DESCRIPTION
-    "Text::Corpus::VoiceOfAmerica::Document" provides methods for accessing
-    the content of VOA news articles for the researching and testing of
-    information processing techniques. Read the Voice of America's Terms of
-    Use statement to ensure you abide by it when using this module.
+    "Text::Corpus::VoiceOfAmerica" can be used to create a temporary corpus
+    of Voice of America news documents for personal research and testing of
+    information processing methods. Read the Voice of America's Terms of Use
+    statement to ensure you abide by it when using this module.
+
+    The categories, description, title, etc... of a specified document are
+    accessed using Text::Corpus::VoiceOfAmerica::Document. Also, all errors
+    and warnings are logged using Log::Log4perl, which should be
+    initialized.
 
 CONSTRUCTOR
   "new"
     The constructor "new" creates an instance of the
-    "Text::Corpus::VoiceOfAmerica::Document" class with the following
-    parameters:
+    "Text::Corpus::VoiceOfAmerica" class with the following parameters:
 
-    "htmlContent"
-          htmlContent => '...'
+    "corpusDirectory"
+         corpusDirectory => '...'
 
-        "htmlContent" is a string of the HTML of the document to be parsed.
-
-    "uri"
-          uri => '...'
-
-        "url" is the URL of the HTML content provided by "htmlContent"; it
-        is also returned as the documents unique identifier by "getUri".
+        "corpusDirectory" is the directory that documents are cached into
+        using CHI. If "corpusDirectory" is not defined, then the path
+        specified in the environment variable
+        "TEXT_CORPUS_VOICEOFAMERICA_CORPUSDIRECTORY" is used if it is
+        defined. If the directory defined does not exist, it will be
+        created. A message is logged and an exception is thrown if no
+        directory is specified.
 
 METHODS
-  "getBody"
-     getBody ()
+  "getDocument"
+     getDocument (index => $documentIndex)
+     getDocument (uri => $uri)
 
-    "getBody" returns an array reference of strings of sentences that are
-    the body of the article.
+    "getDocument" returns a Text::Corpus::VoiceOfAmerica::Document object
+    for the document with index $documentIndex or uri $uri. The document
+    indices range from zero to "getTotalDocument()-1"; "getDocument" returns
+    "undef" if any errors occurred and logs them using Log::Log4perl.
 
-  "getCategories"
-      getCategories ()
+    For example:
 
-    "getCategories" returns an array reference of strings of categories
-    assigned to the article. They are the phrases and words from the
-    "/html/head/meta[@name="KEYWORDS"]" field in the HTML of the document.
+      use Cwd;
+      use File::Spec;
+      use Data::Dump qw(dump);
+      use Log::Log4perl qw(:easy);
+      use Text::Corpus::VoiceOfAmerica;
+      Log::Log4perl->easy_init ($INFO);
+      my $corpusDirectory = File::Spec->catfile (getcwd(), 'corpus_voa');
+      my $corpus = Text::Corpus::VoiceOfAmerica->new (corpusDirectory => $corpusDirectory);
+      $corpus->update (testing => 1, verbose => 1);
+      my $document = $corpus->getDocument (index => 0);
+      dump $document->getBody;
+      dump $document->getCategories;
+      dump $document->getContent;
+      dump $document->getDate;
+      dump $document->getDescription;
+      dump $document->getTitle;
+      dump $document->getUri;
 
-  "getContent"
-     getContent ()
+  "getTotalDocuments"
+      getTotalDocuments ()
 
-    "getContent" returns an array reference of strings of sentences that
-    form the content of the article, the title and body of the article.
+    "getTotalDocuments" returns the total number of documents in the corpus.
+    The index to the documents in the corpus ranges from zero to
+    "getTotalDocuments() - 1".
 
-  "getDate"
-     getDate (format => '%g')
+  "getURIsInCorpus"
+     getURIsInCorpus ()
 
-    "getDate" returns the date and time of the article in the format
-    speficied by "format" that uses the print directives of
-    Date::Manip::Date. The default is to return the date and time in RFC2822
-    format.
+    "getURIsInCorpus" returns an array reference of all the URIs in the
+    corpus.
 
-  "getDescription"
-      getDescription ()
+    For example:
 
-    "getDescription" returns an array reference of strings of sentences,
-    usually one, that describes the articles content. It is from the
-    "/html/head/meta[@name="description"]" field in the HTML of the
-    document.
+      use Cwd;
+      use File::Spec;
+      use Data::Dump qw(dump);
+      use Log::Log4perl qw(:easy);
+      use Text::Corpus::VoiceOfAmerica;
+      Log::Log4perl->easy_init ($INFO);
+      my $corpusDirectory = File::Spec->catfile (getcwd(), 'corpus_voa');
+      my $corpus = Text::Corpus::VoiceOfAmerica->new (corpusDirectory => $corpusDirectory);
+      $corpus->update (testing => 1, verbose => 1);
+      dump $corpus->getURIsInCorpus;
 
-  "getTitle"
-     getTitle ()
+  "update"
+      update (verbose => 0)
 
-    "getTitle" returns an array reference of strings, usually one, of the
-    title of the article.
+    This method updates the set of documents in the corpus by fetching any
+    newly listed documents in the "sitemap.xml" file.
 
-  "getUri"
-      getUri ()
+    "verbose"
+          verbose => 0
 
-    "getUri" returns the URL of the document.
+        If "verbose" is positive, then after each new document is fetched a
+        message is logged stating the number of documents remaining to fetch
+        and the approximate time to completion. "update" returns the number
+        of documents fetched.
+
+    "testing"
+          testing => 0
+
+        If "testing" is true, only one document is added to the corpus.
+
+    For example:
+
+      use Cwd;
+      use File::Spec;
+      use Data::Dump qw(dump);
+      use Log::Log4perl qw(:easy);
+      use Text::Corpus::VoiceOfAmerica;
+      Log::Log4perl->easy_init ($INFO);
+      my $corpusDirectory = File::Spec->catfile (getcwd(), 'corpus_voa');
+      my $corpus = Text::Corpus::VoiceOfAmerica->new (corpusDirectory => $corpusDirectory);
+      $corpus->update (testing => 1, verbose => 1);
+      dump $corpus->getTotalDocuments;
+
+EXAMPLES
+    The example below will print out all the information for each document
+    in the corpus.
+
+      use Cwd;
+      use File::Spec;
+      use Data::Dump qw(dump);
+      use Log::Log4perl qw(:easy);
+      use Text::Corpus::VoiceOfAmerica;
+      Log::Log4perl->easy_init ($INFO);
+      my $corpusDirectory = File::Spec->catfile (getcwd(), 'corpus_voa');
+      my $corpus = Text::Corpus::VoiceOfAmerica->new (corpusDirectory => $corpusDirectory);
+      $corpus->update (testing => 1, verbose => 1);
+      my $totalDocuments = $corpus->getTotalDocuments;
+      for (my $i = 0; $i < $totalDocuments; $i++)
+      {
+        eval
+          {
+            my $document = $corpus->getDocument(index => $i);
+            next unless defined $document;
+            my %documentInfo;
+            $documentInfo{title} = $document->getTitle();
+            $documentInfo{body} = $document->getBody();
+            $documentInfo{date} = $document->getDate();
+            $documentInfo{content} = $document->getContent();
+            $documentInfo{categories} = $document->getCategories();
+            $documentInfo{description} = $document->getDescription();
+            $documentInfo{uri} = $document->getUri();
+            dump \%documentInfo;
+          };
+      }
 
 INSTALLATION
-    For installation instructions see Text::Corpus::VoiceOfAmerica.
+    To install the module set "TEXT_CORPUS_VOICEOFAMERICA_FULL_TESTING" to
+    true and run the following commands:
+
+      perl Makefile.PL
+      make
+      make test
+      make install
+
+    If you are on a windows box you should use 'nmake' rather than 'make'.
+
+    The module will install if "TEXT_CORPUS_VOICEOFAMERICA_FULL_TESTING" is
+    not defined or false, but little testing will be performed.
 
 AUTHOR
      Jeff Kubina<jeff.kubina@gmail.com>
@@ -109,6 +197,5 @@ KEYWORDS
     information processing, english corpus, voa, voice of america
 
 SEE ALSO
-    CHI, HTML::TreeBuilder::XPath, Lingua::EN::Sentence, Log::Log4perl,
-    Text::Corpus::VoiceOfAmerica
+    CHI, Log::Log4perl, Text::Corpus::VoiceOfAmerica::Document
 

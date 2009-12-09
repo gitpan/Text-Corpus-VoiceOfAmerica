@@ -20,7 +20,7 @@ use Text::Corpus::VoiceOfAmerica::Document;
 BEGIN {
     use Exporter ();
     use vars qw($VERSION @ISA @EXPORT @EXPORT_OK %EXPORT_TAGS);
-    $VERSION     = '1.00';
+    $VERSION     = '1.01';
     @ISA         = qw(Exporter);
     @EXPORT      = qw();
     @EXPORT_OK   = qw();
@@ -92,9 +92,9 @@ sub new
   # set the corpusDirectory.
   unless (exists ($Parameters{corpusDirectory}))
   {
-    if (defined (%ENV) && exists ($ENV{TEXT_CORPUS_NEWYORKTIMES_CORPUSDIRECTORY}))
+    if (defined (%ENV) && exists ($ENV{TEXT_CORPUS_VOICEOFAMERICA_CORPUSDIRECTORY}))
     {
-      $Parameters{corpusDirectory} = $ENV{TEXT_CORPUS_NEWYORKTIMES_CORPUSDIRECTORY};
+      $Parameters{corpusDirectory} = $ENV{TEXT_CORPUS_VOICEOFAMERICA_CORPUSDIRECTORY};
     }
   }
 

@@ -8,7 +8,7 @@ use Date::Manip;
 BEGIN {
   use Exporter ();
   use vars qw($VERSION @ISA @EXPORT @EXPORT_OK %EXPORT_TAGS);
-  $VERSION = '1.0';
+  $VERSION = '1.01';
   @ISA     = qw();
   @EXPORT      = qw();
   @EXPORT_OK   = qw();

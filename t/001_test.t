@@ -26,8 +26,8 @@ if (defined (%ENV) && exists ($ENV{TEXT_CORPUS_VOICEOFAMERICA_FULL_TESTING}) && 
     diag ("\nTesting with network access.\n");
 
     # make sure there is network access
-    my $testContent = get ('http://www.cnn.com');
-    ok (0, 'Could not fetch page www.cnn.com.') unless defined $testContent;
+    my $testContent = get ('http://www1.voanews.com');
+    ok (0, 'Could not fetch page www1.voanews.com.') unless defined $testContent;
 
     # should fetch at least one document and parse it.
     diag ("Next test can take up to two minutes.\n");

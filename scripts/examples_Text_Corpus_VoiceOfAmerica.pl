@@ -4,6 +4,10 @@ use strict;
 use warnings;
 use diagnostics;
 
+my $corpusDirectory;
+$corpusDirectory = $ENV{TEXT_CORPUS_VOICEOFAMERICA_CORPUSDIRECTORY} if exists $ENV{TEXT_CORPUS_VOICEOFAMERICA_CORPUSDIRECTORY};
+die '$corpusDirectory' . " not defined.\n" unless defined $corpusDirectory;
+
 {
   use Cwd;
   use File::Spec;
