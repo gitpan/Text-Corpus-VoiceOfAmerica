@@ -14,13 +14,15 @@ use URI::Escape;
 use File::Copy;
 use XML::LibXML;
 use Text::Corpus::VoiceOfAmerica::Document;
+use HTML::Encoding 'encoding_from_html_document';
+use Data::Dump qw(dump);
 
 # TODO: add sync index to cache.
 
 BEGIN {
     use Exporter ();
     use vars qw($VERSION @ISA @EXPORT @EXPORT_OK %EXPORT_TAGS);
-    $VERSION     = '1.01';
+    $VERSION     = '1.02';
     @ISA         = qw(Exporter);
     @EXPORT      = qw();
     @EXPORT_OK   = qw();
@@ -77,7 +79,7 @@ with the following parameters:
 C<corpusDirectory> is the directory that documents are cached into using
 L<CHI>. If C<corpusDirectory> is not defined,
 then the path specified in the environment variable C<TEXT_CORPUS_VOICEOFAMERICA_CORPUSDIRECTORY>
-is used if it is defined. If the directory defined does not exist, it will be 
+is used if it is defined. If the directory defined does not exist, it will be
 created. A message is logged and an exception is thrown if no directory is specified.
 
 =back
@@ -92,7 +94,7 @@ sub new
   # set the corpusDirectory.
   unless (exists ($Parameters{corpusDirectory}))
   {
-    if (defined (%ENV) && exists ($ENV{TEXT_CORPUS_VOICEOFAMERICA_CORPUSDIRECTORY}))
+    if (%ENV && exists ($ENV{TEXT_CORPUS_VOICEOFAMERICA_CORPUSDIRECTORY}))
     {
       $Parameters{corpusDirectory} = $ENV{TEXT_CORPUS_VOICEOFAMERICA_CORPUSDIRECTORY};
     }
@@ -134,8 +136,13 @@ sub new
   $Self->{cacheExpiration} = $Parameters{cacheExpiration} if defined $Parameters{cacheExpiration};
 
   # set the delay between page fetches in seconds.
-  $Self->{delayInSeconds} = 30;
+  $Self->{delayInSeconds} = 8;
   $Self->{timeOfLastPageFetch} = 0;
+  $Self->{maxFetchAttempts} = 4;
+
+  # set the verbosity level.
+  $Self->{verbose} = 0;
+  $Self->{verbose} = $Parameters{verbose} if exists $Parameters{verbose};
 
   # get the article index from the cache.
   $Self->_getIndex ();
@@ -147,15 +154,40 @@ sub new
 
 =head2 C<getDocument>
 
- getDocument (index => $documentIndex)
- getDocument (uri => $uri)
+ getDocument (index => $index, cacheOnly => 0)
+ getDocument (uri => $uri, cacheOnly => 0)
 
 C<getDocument> returns a L<Text::Corpus::VoiceOfAmerica::Document> object for the
 document with index C<$documentIndex> or uri C<$uri>. The document
 indices range from zero to C<getTotalDocument()-1>; C<getDocument> returns
 C<undef> if any errors occurred and logs them using L<Log::Log4perl>.
 
-For example:
+=over
+
+=item C<index>
+
+ index => '...'
+
+C<index> should be the number of the document to return. It should be a
+non-negative integer less than C<getTotalDocument>. If it is out of range
+C<undef> is returned.
+
+=item C<uri>
+
+ uri => '...'
+
+C<uri> should be the URL of the document to return. If the document is not in the cache,
+it is fetched unless C<cacheOnly> evaluates to false, in that case C<undef> is returned.
+
+=item C<cacheOnly>
+
+ cacheOnly => 0
+
+If C<cacheOnly> evaluates to true, then only documents in the cache are returned, otherwise C<undef> is returned. The default is false.
+
+=back
+
+An example:
 
   use Cwd;
   use File::Spec;
@@ -185,6 +217,7 @@ sub getDocument
   my $urlIndex = $Self->{urlIndex};
   my $urlHash = $Self->{urlHash};
   my $indexOfArticle;
+  my $cacheOnly = exists ($Parameters{cacheOnly}) && $Parameters{cacheOnly};
 
   # if the index is defined and valid, use it.
   $indexOfArticle = int abs $Parameters{index} if exists $Parameters{index};
@@ -231,14 +264,14 @@ sub getDocument
   my $url = $urlIndex->[$indexOfArticle];
 
   # get the html content of the article.
-  my $htmlContent = $Self->_getArticle (index => $indexOfArticle);
-  return undef unless defined $htmlContent;
+  my $htmlEncoding = $Self->_getArticle (index => $indexOfArticle, cacheOnly => $cacheOnly);
+  return undef unless defined $htmlEncoding;
 
   # get the document object.
   my $document;
   eval
   {
-    $document =  Text::Corpus::VoiceOfAmerica::Document->new (htmlContent => $$htmlContent, uri => $url);
+    $document =  Text::Corpus::VoiceOfAmerica::Document->new (htmlContent => $htmlEncoding->[0], uri => $url, encoding => $htmlEncoding->[1]);
   };
   if ($@)
   {
@@ -279,9 +312,13 @@ sub _getIndex
 
   # get the index.
   my $urlIndex = $Self->{cacheEngine}->get ('urlIndex');
+  my $problemUrls = $Self->{cacheEngine}->get ('problemUrls');
+  my $urlsInCache = $Self->{cacheEngine}->get ('urlsInCache');
 
   # set the index to empty if it did not exist.
   $urlIndex = [] unless defined $urlIndex;
+  $problemUrls = {} unless defined $problemUrls;
+  $urlsInCache = {} unless defined $urlsInCache;
 
   # create the reverse hash of the index.
   my %urlHash;
@@ -293,6 +330,8 @@ sub _getIndex
   # store the index and exit.
   $Self->{urlIndex} = $urlIndex;
   $Self->{urlHash} = \%urlHash;
+  $Self->{problemUrls} = $problemUrls;
+  $Self->{urlsInCache} = $urlsInCache;
   return undef;
 }
 
@@ -622,12 +661,21 @@ sub _primeCache
   my @documentsToFetch;
   for (my $i = 0; $i < $totalDocuments; $i++)
   {
-    push @documentsToFetch, $i unless $Self->_isDocumentInCache (index => $i)
+    my $url = $Self->{urlIndex}->[$i];
+    next if (exists ($Self->{problemUrls}->{$url}) && ($Self->{problemUrls}->{$url} >= $Self->{maxFetchAttempts}));
+    next if exists $Self->{urlsInCache}->{$url};
+    if ($Self->_isDocumentInCache (index => $i))
+    {
+      $Self->{urlsInCache}->{$url} = 1;
+      next;
+    }
+    push @documentsToFetch, $i;
   }
 
   # fetch the documents.
   my $documentsLeft = scalar @documentsToFetch;
   my $totalDocumentsFetched = 0;
+
   foreach my $i (@documentsToFetch)
   {
     # compute the time remaining.
@@ -642,7 +690,9 @@ sub _primeCache
     }
 
     # fetch the document and put it in the cache.
-    eval {$Self->_getArticle (index => $i);};
+    my $content;
+    eval {$content = $Self->_getArticle (index => $i, %Parameters);};
+    $Self->{problemUrls}->{$Self->{urlIndex}->[$i]} += 1 unless defined $content;
 
     # keep track of the documents left.
     --$documentsLeft;
@@ -654,6 +704,10 @@ sub _primeCache
     last if ($totalDocumentsFetched && exists ($Parameters{testing}));
   }
 
+  # update the problemUrls data in the cache.
+  $Self->{cacheEngine}->set ('problemUrls', $Self->{problemUrls}, $Self->{cacheExpiration});
+  $Self->{cacheEngine}->set ('urlsInCache', $Self->{urlsInCache}, $Self->{cacheExpiration});
+
   return $totalDocumentsFetched;
 }
 
@@ -663,88 +717,112 @@ sub _isDocumentInCache # (index => ...)
   my ($Self, %Parameters) = @_;
 
   # get the url to check.
-  my $url = $Self->{urlIndex}->[$Parameters{index}];
+  my $md5OfUrl;
+  $md5OfUrl = $Parameters{md5OfUrl} if exists $Parameters{md5OfUrl};
+
+  my $url;
+  $url = $Parameters{url} if exists $Parameters{url};
+  $url = $Self->{urlIndex}->[$Parameters{index}] if (!defined ($url) && exists ($Parameters{index}));
 
   # need to convert url to md5hex since cache uses it as filename
   # and urls could be too long.
-  my $md5OfUrl = md5_hex ($url);
+  $md5OfUrl = md5_hex ($url) if (!defined ($md5OfUrl) && defined ($url));
 
   # if the page is in the cache, return it from there.
   my $cacheEngine = $Self->{cacheEngine};
+
   return $cacheEngine->is_valid ($md5OfUrl);
 }
 
 # fetches the html page of an article given its url. first it looks in the
 # cache, if not there it fetches it and places the contents in the cache.
 # returns undef if problems, otherwise returns a string reference to the pages content.
+
 sub _getArticle
 {
   my ($Self, %Parameters) = @_;
 
   # get the url to fetch.
-  my $url;
-  my $totalDocuments = scalar @{$Self->{urlIndex}};
-  if (exists ($Parameters{index}))
-  {
-    if (abs ($Parameters{index}) < $totalDocuments)
-    {
-      $url = $Self->{urlIndex}->[$Parameters{index}];
-    }
-    else
-    {
-      my $logger = Log::Log4perl->get_logger();
-      $logger->logwarn ("index " . $Parameters{index} . ' is out of range: [0, ' . $totalDocuments . ", ).\n");
-      last;
-    }
-  }
-  else
-  {
-    $url = $Parameters{url};
-  }
+  my $md5OfUrl = $Parameters{md5OfUrl} if exists $Parameters{md5OfUrl};
+  my $url = $Self->{urlIndex}->[$Parameters{index}] if exists $Parameters{index};
 
   # need to convert url to md5hex since cache uses it as filename
   # and urls could be too long.
-  my $md5OfUrl = md5_hex ($url);
+  $md5OfUrl = md5_hex ($url) if defined $url;
 
   # if the page is in the cache, return it from there.
   my $cacheEngine = $Self->{cacheEngine};
   my $pageContents = $cacheEngine->get ($md5OfUrl);
-
   if (defined $pageContents)
   {
-    # set the page contents for utf8 encoding.
-    utf8::decode($pageContents) unless (utf8::is_utf8 ($pageContents));
+    # log the cache hit.
+    if ($Parameters{logCacheHitsMisses})
+    {
+      my $logger = Log::Log4perl->get_logger();
+      $logger->info ("cache hit: $md5OfUrl: $url\n");
+    }
 
-    #print 'cache: ' . $url . "\n" if defined $pageContents;
-    return undef if (index ($pageContents, 'This page is in the process of being created or has temporarily been inactivated') > -1);
-    return undef if (index ($pageContents, 'Error Occurred While Processing Request') > -1);
-    return undef if (index ($pageContents, 'File not found') > -1);
-    return undef unless length ($pageContents);
-    return \$pageContents;
+    # return its contents, decoded.
+    my $encoding = encoding_from_html_document($pageContents, xhtml => 0);
+    $encoding = encoding_from_html_document($pageContents, xhtml => 1) unless defined $encoding;
+    unless (defined $encoding)
+    {
+      my $logger = Log::Log4perl->get_logger();
+      $logger->info ("could not determine encoding, defaulting to utf8: $md5OfUrl: $url\n");
+    }
+    $encoding = 'utf8' unless defined $encoding;
+    my $decodedPageContents;
+    eval {$decodedPageContents = decode ($encoding, $pageContents, Encode::LEAVE_SRC);};
+    $decodedPageContents = $pageContents unless defined $decodedPageContents;
+    return [$decodedPageContents, $encoding];
   }
 
+  # log the cache hit.
+  if ($Parameters{logCacheHitsMisses})
+  {
+    my $logger = Log::Log4perl->get_logger();
+    $logger->info ("cache miss: $md5OfUrl: $url\n");
+  }
+
+  # return now if only getting from the cache.
+  return undef if (exists ($Parameters{cacheOnly}) && $Parameters{cacheOnly});
+
+  # if we tried to fetch it too many times already don't try again.
+  return undef if (exists ($Self->{problemUrls}->{$url}) && ($Self->{problemUrls}->{$url} >= $Self->{maxFetchAttempts}));
+
+  # wait before fetching the page.
+  my $delay = $Self->{delayInSeconds} - (time - $Self->{timeOfLastPageFetch});
+  sleep $delay if ($delay > 0);
+
   # fetch the page.
-  $pageContents = $Self->_getUrl (url => $url);
-  return undef unless (defined ($pageContents));
+  $pageContents = get ($url);
 
-  #print 'not in cache: ' . $url . "\n" if defined $pageContents;
+  $Self->{timeOfLastPageFetch} = time;
+  unless (defined ($pageContents))
+  {
+    $Self->{problemUrls}->{$url} += 5;
+    my $logger = Log::Log4perl->get_logger();
+    $logger->logwarn ("problems fetching page '$url'.\n");
+    return undef;
+  }
 
-  # convert the page contents to octets; wide characters will cause the
-  # cache engine to throw exceptions.
-  utf8::encode($pageContents) if (utf8::is_utf8 ($pageContents));
-
-  # cache the page.
+  # cache the page
   $cacheEngine->set ($md5OfUrl, $pageContents, $Self->{cacheExpiration});
+  $Self->{urlsInCache}->{$url} = 1;
 
-  # if page not valid, return undef.
-  utf8::decode($pageContents) unless (utf8::is_utf8 ($pageContents));
-  return undef if (index ($pageContents, 'This page is in the process of being created or has temporarily been inactivated') > -1);
-  return undef if (index ($pageContents, 'Error Occurred While Processing Request') > -1);
-  return undef if (index ($pageContents, 'File not found') > -1);
-  return undef unless length ($pageContents);
-
-  # return its contents.
-  return \$pageContents;
+  # return its contents, decoded.
+  my $encoding = encoding_from_html_document($pageContents, xhtml => 0);
+  $encoding = encoding_from_html_document($pageContents, xhtml => 1) unless defined $encoding;
+  unless (defined $encoding)
+  {
+    my $logger = Log::Log4perl->get_logger();
+    $logger->info ("could not determine encoding, defaulting to utf8: $md5OfUrl: $url\n");
+  }
+  $encoding = 'utf8' unless defined $encoding;
+  my $decodedPageContents;
+  eval {$decodedPageContents = decode ($encoding, $pageContents, Encode::LEAVE_SRC);};
+  $decodedPageContents = $pageContents unless defined $decodedPageContents;
+  return [$decodedPageContents, $encoding];
 }
 
 # fetches the contents for the page linking to all the RSS feeds
@@ -764,7 +842,7 @@ sub _getListOfFeeds
   # sloppy to use regexp; but simple.
   # http://www1.voanews.com/english-usa.rss
   my %hashOfFeeds;
-  while ($content =~ m|\"(http:\/\/www.?\.voanews\.com\/english[^\"]*?\.rss)\"|ig)
+  while ($content =~ m|\"(http://www.?\.voanews\.com/templates/Articles\.rss[^\"]*?)\"|ig)
   {
     my $match = $1;
     $hashOfFeeds{$match} = 1;
@@ -808,8 +886,13 @@ sub _getListOfNewArticleUrlsViaRss
     unless (defined $rss)
     {
       my $logger = Log::Log4perl->get_logger();
-      $logger->warn ("problems from url '" . $feedUrl . "' with string content '" . $rssContent . "'");
-      return [];
+      $logger->warn ("problems from url '" . $feedUrl . "'.\n");
+      my $links = $Self->_getRssLinksUsingRegexp (rssContent => $rssContent);
+      foreach my $link (@$links)
+      {
+        $hashOfLinks{$link} = 1;
+      }
+      next;
     }
 
     # pull out the links from each item.
@@ -839,6 +922,34 @@ sub _getListOfNewArticleUrlsViaRss
   return [sort keys %hashOfLinks];
 }
 
+
+sub _getRssLinksUsingRegexp
+{
+  my ($Self, %Parameters) = @_;
+
+  # if there is no content, return emtpy list of links.
+  my @rssLinks;
+  return \@rssLinks unless exists $Parameters{rssContent};
+
+  # strip off all before the first '<item>'.
+  my $rssContent = $Parameters{rssContent};
+  $rssContent =~ s/^[\x00-\xff]*?<item>/<item>/;
+
+  # get each item block.
+  my @items = split (/<item>/, $rssContent);
+
+  # get the link from each item.
+  foreach my $item (@items)
+  {
+    if ($item =~ m|<link>([^\<]+)</link>|)
+    {
+      push @rssLinks, $1;
+    }
+  }
+  return \@rssLinks;
+}
+
+
 sub _convertDurationInSecondsToWords
 {
   my $DurationInSeconds = shift;
@@ -863,6 +974,177 @@ sub _convertDurationInSecondsToWords
     $duration /= $timeUnit->[0];
   }
   return $duration . ' decades' . $timeInPast;
+}
+
+# writes the contents of the cache to the file csvFile => '...' in
+# csv format where each line is of the form url,html
+# all formating and higher order bits are escaped using
+# URI::Escape::uri_escape.
+
+sub exportCacheToCsvFile
+{
+  my ($Self, %Parameters) = @_;
+
+  # get the total documents in the cache.
+  my $totalDocuments = $Self->getTotalDocuments();
+
+  # get the path of the csv file.
+  my $csvFile = $Parameters{csvFile};
+  my $fh;
+  unless (open ($fh, '>:raw', $csvFile))
+  {
+    my $logger = Log::Log4perl->get_logger();
+    $logger->logdie ("could no open file '$csvFile' for writing: $!\n");
+  }
+
+  my $charsToEscape = "\x00-\x1f\x7f-\xff,";
+  for (my $i = 0; $i < $totalDocuments; $i++)
+  {
+    eval
+    {
+      # fetch the document.
+      my $document = $Self->getDocument(index => $i, cacheOnly => 1);
+      if (defined ($document))
+      {
+        # get the raw html of the document.
+        my $html = $document->getHtml();
+        next unless defined $html;
+
+        # get the uri of the document.
+        my $uri = $document->getUri();
+        next unless defined $uri;
+
+        # escape all but letters and numbers.
+        my $encoding = $document->getEncoding();
+        $encoding = 'utf8' unless defined $encoding;
+        $html = encode ($encoding, $html, Encode::LEAVE_SRC);
+        $html = uri_escape ($html, $charsToEscape);
+        $uri = uri_escape ($uri, $charsToEscape);
+
+        # write the escaped uri and html to the file.
+        print $fh $uri . ',' . $html . "\n";
+      }
+      else
+      {
+        my $logger = Log::Log4perl->get_logger();
+        $logger->logwarn ('problems with document number ' . $i . "; document skipped.\n");
+      }
+    };
+  }
+
+  close $fh;
+}
+
+sub importCsvFileIntoCache
+{
+  my ($Self, %Parameters) = @_;
+
+  # get the path of the csv file.
+  my $csvFile = $Parameters{csvFile};
+  local *IN;
+  unless (open (IN, '<:raw', $csvFile))
+  {
+    my $logger = Log::Log4perl->get_logger();
+    $logger->logdie ("could no open file '$csvFile' for reading: $!\n");
+  }
+
+  my @listOfArticles;
+  while (my $line = <IN>)
+  {
+    # remove the end line chars.
+    chop $line;
+
+    # split the line at the comma.
+    my ($uri, $htmlContent) = split (/,/, $line);
+
+    # unescape the uri and content.
+    $uri = uri_unescape ($uri);
+    $htmlContent = uri_unescape ($htmlContent);
+    push @listOfArticles, [$uri, $htmlContent];
+
+    # add the list of articles to the cache.
+    if (@listOfArticles > 100)
+    {
+      $Self->addListOfArticles (listOfArticles => \@listOfArticles);
+      @listOfArticles = ();
+    }
+  }
+  close IN;
+
+  # add the remaining list of articles to the cache.
+  if (@listOfArticles > 0)
+  {
+    $Self->addListOfArticles (listOfArticles => \@listOfArticles);
+    @listOfArticles = ();
+  }
+
+  return undef;
+}
+
+# adds list of articles of the for listOfArticles => [[url, html], ..., [url, html]]
+# to the index and cache. if an article is already in the cache it is not added.
+# returns the total number of articles added.
+
+sub addListOfArticles # (listOfArticles => [[url, html], ..., [url, html]])
+{
+  my ($Self, %Parameters) = @_;
+
+  # get the uri index/hash.
+  my $urlIndex = $Self->{urlIndex};
+  my $urlHash = $Self->{urlHash};
+  my $totalDocuments = $Self->getTotalDocuments ();
+
+  # get the caching object.
+  my $cacheEngine = $Self->{cacheEngine};
+
+  # get the list of articles to add.
+  my $listOfArticles = $Parameters{listOfArticles};
+
+  my $totalAdded = 0;
+  foreach my $urlHtmlPair (@$listOfArticles)
+  {
+    # get the url of the article.
+    my $url = $urlHtmlPair->[0];
+
+    # skip the article if already in the cache.
+    if ($Self->_isDocumentInCache (url => $url) && exists ($urlHash->{$url}))
+    {
+      if ($Self->{verbose} > 1)
+      {
+        my $logger = Log::Log4perl->get_logger();
+        $logger->info ("cache hit: $url\n");
+      }
+      next;
+    }
+
+    if ($Self->{verbose})
+    {
+      my $logger = Log::Log4perl->get_logger();
+      $logger->info ("cache miss: $url\n");
+    }
+
+    # get the html content of the page.
+    my $htmlContent = $urlHtmlPair->[1];
+
+    # need to convert url to md5hex since cache uses it as filename
+    # and urls could be too long.
+    my $md5OfUrl = md5_hex ($url);
+
+    # cache the page.
+    $cacheEngine->set ($md5OfUrl, $htmlContent, $Self->{cacheExpiration});
+
+    # update the index to the documents.
+    $urlIndex->[$totalDocuments] = $url;
+    $urlHash->{$url} = $totalDocuments;
+    ++$totalDocuments;
+    ++$totalAdded;
+  }
+
+  # store the urls in the cache. it is really slow to store this to the disk cache each time
+  # a new document url is added.
+  $cacheEngine->set ('urlIndex', $urlIndex, $Self->{cacheExpiration});
+
+  return $totalAdded;
 }
 
 =head1 EXAMPLES
@@ -910,7 +1192,16 @@ run the following commands:
 If you are on a windows box you should use 'nmake' rather than 'make'.
 
 The module will install if C<TEXT_CORPUS_VOICEOFAMERICA_FULL_TESTING> is not defined
-or false, but little testing will be performed. 
+or false, but little testing will be performed.
+
+=head1 BUGS
+
+This module uses xpath expressions to extract links and text which may become invalid
+as the format of various pages change, causing a lot of bugs.
+
+Please email bugs reports or feature requests to C<text-corpus-voiceofamerica@rt.cpan.org>, or through
+the web interface at L<http://rt.cpan.org/Public/Bug/Report.html?Queue=Text-Corpus-VoiceOfAmerica>.  The author
+will be notified and you can be automatically notified of progress on the bug fix or feature request.
 
 =head1 AUTHOR
 
@@ -927,7 +1218,7 @@ LICENSE file included with this module.
 
 =head1 KEYWORDS
 
-information processing, english corpus, voa, voice of america
+corpus, english corpus, information processing, voa, voice of america
 
 =head1 SEE ALSO
 

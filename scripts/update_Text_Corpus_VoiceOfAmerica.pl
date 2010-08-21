@@ -40,6 +40,15 @@ approximate time to completion.
 
 Causes documentation to be printed.
 
+=head1 BUGS
+
+This script uses xpath expressions to extract links and text which may become invalid
+as the format of various pages change, causing a lot of bugs.
+
+Please email bugs reports or feature requests to C<text-corpus-voiceofamerica@rt.cpan.org>, or through
+the web interface at L<http://rt.cpan.org/NoAuth/ReportBug.html?Text-Corpus-VoiceOfAmerica>.  The author
+will be notified and you can be automatically notified of progress on the bug fix or feature request.
+
 =head1 AUTHOR
 
  Jeff Kubina<jeff.kubina@gmail.com>
@@ -84,11 +93,12 @@ use Cwd qw(getcwd abs_path);
 use Pod::Usage;
 use Data::Dump qw(dump);
 
-my $corpusDirectory;
+my $corpusDirectory = $ENV{HOME} . '/projects/corpora/voa';
 my $doParsingTest = 0;
 my $helpMessage = 0;
-my $verbose = 0;
-my $result = GetOptions ("d:s" => \$corpusDirectory, "t" => \$doParsingTest, "h|help" => \$helpMessage, "v|verbose" => \$verbose);
+my $verbose = 1;
+my $logCacheHitsMisses = 0;
+my $result = GetOptions ("d:s" => \$corpusDirectory, "t" => \$doParsingTest, "h|help" => \$helpMessage, "v|verbose" => \$verbose, "c" => \$logCacheHitsMisses);
 
 # print info message
 if ($helpMessage)
@@ -123,7 +133,7 @@ my $processInfo = Proc::Pidfile->new (pidfile => $pid, silent => 1);
 
 # update the new list of files.
 my $corpus = Text::Corpus::VoiceOfAmerica->new(corpusDirectory => $corpusDirectory);
-$corpus->update(verbose => $verbose);
+$corpus->update(verbose => $verbose, logCacheHitsMisses => $logCacheHitsMisses);
 
 # test parsing of each article.
 if ($doParsingTest)

@@ -8,7 +8,7 @@ use Date::Manip;
 BEGIN {
   use Exporter ();
   use vars qw($VERSION @ISA @EXPORT @EXPORT_OK %EXPORT_TAGS);
-  $VERSION = '1.01';
+  $VERSION = '1.02';
   @ISA     = qw();
   @EXPORT      = qw();
   @EXPORT_OK   = qw();
@@ -66,7 +66,7 @@ C<htmlContent> is a string of the HTML of the document to be parsed.
 
   uri => '...'
 
-C<url> is the URL of the HTML content provided by C<htmlContent>; it is
+C<uri> is the URL of the HTML content provided by C<htmlContent>; it is
 also returned as the documents unique identifier by C<getUri>.
 
 =back
@@ -82,6 +82,7 @@ sub new
 	
   $Self->{htmlParser} = HTML::TreeBuilder::XPath->new;
   $Self->{htmlContent} = $Parameters{htmlContent};
+  $Self->{encoding} = $Parameters{encoding};
 
   # i am so lazy sometimes...
   my $htmlContent = $Self->{htmlContent};
@@ -108,6 +109,7 @@ C<getBody> returns an array reference of strings of sentences that are the body 
 # returns the body of the article.
 sub getBody
 {
+  use Data::Dump qw(dump);
   my $Self = shift;
 
   # if body already exists, return it now.
@@ -120,8 +122,9 @@ sub getBody
   push @xpaths, '/html/body/div/table/tr/td/table/tr/td/div/div/div/span/p';
   push @xpaths, '/html/body/div/table/tr/td/table/tr/td/div/span/p';
   push @xpaths, '/html/body/div[2]/div[2]/div[2]/div[@id="mainContent"]/p[(@class!="byline") and (@class!="articleSummary")]';
-  #push @xpaths, '/html/body/div[2]/div[2]/div[2]/div/p';
-
+  push @xpaths, '/html/body/div/div/div/div/p';
+  push @xpaths, '//span[@class="article_14"]';
+  push @xpaths, '//span[@class="body"]//p';
 
   # get the article content.
   my @linesOfText;
@@ -131,15 +134,42 @@ sub getBody
     foreach my $line (@nodes)
     {
       $line =~ s/Some\s*information\s*for\s*this\s*report\s*was\s*provided\s*by.*?\.//i;
+      $line =~ s/More\s*reports\s*from.*$//i;
       $line =~ s/\xA0/ /g;
       $line =~ s/^\s+//;
       $line =~ s/\s+$//;
       next unless length ($line);
+      next unless ($line =~ /\p{L}/);
       my $sentences = get_sentences ($line);
       next unless defined $sentences;
       push @linesOfText, @$sentences;
     }
-    last if @linesOfText;
+    if (@linesOfText)
+    {
+      last;
+    }
+  }
+
+  # if at this point no lines of the body text were found we may have a
+  # parsing problem (bad html). so resort to finding all paragraphs.
+  unless (@linesOfText)
+  {
+    my @nodesToDump=$Self->{htmlParser}->findvalues('/html/body/div//p');
+    my %nodesToDump = map { ($_, 1) } @nodesToDump;
+    my @allNodes=$Self->{htmlParser}->findvalues('//p');
+
+    my @nodes;
+    foreach my $line (@allNodes)
+    {
+      next if exists $nodesToDump{$line};
+      next if ($line =~ /^More reports from/i);
+      $line =~ s/Some\s*information\s*for\s*this\s*report\s*was\s*provided\s*by.*?\.//i;
+      next unless length ($line);
+      next unless ($line =~ /\p{L}/);
+      my $sentences = get_sentences ($line);
+      next unless defined $sentences;
+      push @linesOfText, @$sentences;
+    }
   }
 
   # return the title and lines of body text.
@@ -282,6 +312,7 @@ sub getDescription
   # get the $description.
   my @descriptions = $Self->{htmlParser}->findvalues('/html/head/meta[@name="Description"]/@content');
   push @descriptions, $Self->{htmlParser}->findvalues('/html/body/div[2]/div[2]/div[2]/div/p[@class="articleSummary"]');
+  push @descriptions, $Self->{htmlParser}->findvalues('/html/head/meta[@name="description"]/@content');
   $Self->_trim (\@descriptions);
 
   # pull out the sentences.
@@ -298,6 +329,37 @@ sub getDescription
   $Self->_trim ($description);
   $Self->{description} = $description;
   return $Self->{description};
+}
+
+
+=head2 C<getEncoding>
+
+  getEncoding ()
+
+C<getEncoding> returns the original encoding used by the HTML of the document.
+
+=cut
+
+sub getEncoding
+{
+  my $Self = shift;
+  return $Self->{encoding} if exists $Self->{encoding};
+  return undef;
+}
+
+=head2 C<getHtml>
+
+  getHtml ()
+
+C<getHtml> returns the HTML of the document as a string.
+
+=cut
+
+sub getHtml
+{
+  my $Self = shift;
+  return $Self->{htmlContent} if exists $Self->{htmlContent};
+  return undef;
 }
 
 =head2 C<getTitle>
@@ -317,8 +379,10 @@ sub getTitle
   return $Self->{title} if exists $Self->{title};
 
   # get the print headline.
-  my @titleLines = $Self->{htmlParser}->findvalues('/html/body/div/table/tr/td/table/tr/td/div/div/table/tr/td/span[@class="articleheadline"]');
-  push @titleLines, $Self->{htmlParser}->findvalues('/html/body/div[2]/div[2]/div[2]/div/h2');
+  my @titleLines;
+  @titleLines = $Self->{htmlParser}->findvalues('//*[@class="articleheadline"]');
+  push @titleLines, $Self->{htmlParser}->findvalues('/html/body/div[2]/div[2]/div[2]/div/h2') unless @titleLines;
+  push @titleLines, $Self->{htmlParser}->findvalues('//*[@class="headline"]') unless @titleLines;
 
   # return the title and lines of body text.
   $Self->{title} = \@titleLines;
@@ -366,6 +430,15 @@ sub DESTROY
 
 For installation instructions see L<Text::Corpus::VoiceOfAmerica>.
 
+=head1 BUGS
+
+This module uses xpath expressions to extract links and text which may become invalid
+as the format of various pages change, causing a lot of bugs.
+
+Please email bugs reports or feature requests to C<text-corpus-voiceofamerica@rt.cpan.org>, or through
+the web interface at L<http://rt.cpan.org/Public/Bug/Report.html?Queue=Text-Corpus-VoiceOfAmerica>.  The author
+will be notified and you can be automatically notified of progress on the bug fix or feature request.
+
 =head1 AUTHOR
 
  Jeff Kubina<jeff.kubina@gmail.com>
@@ -381,7 +454,7 @@ LICENSE file included with this module.
 
 =head1 KEYWORDS
 
-information processing, english corpus, voa, voice of america
+corpus, english corpus, information processing, voa, voice of america
 
 =head1 SEE ALSO
 

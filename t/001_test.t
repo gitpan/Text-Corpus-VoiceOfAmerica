@@ -21,7 +21,7 @@ my $corpus = Text::Corpus::VoiceOfAmerica->new (corpusDirectory => $corpusDirect
 isa_ok ($corpus, 'Text::Corpus::VoiceOfAmerica');
 
 # prompt for request to run tests that require network acccess.
-if (defined (%ENV) && exists ($ENV{TEXT_CORPUS_VOICEOFAMERICA_FULL_TESTING}) && $ENV{TEXT_CORPUS_VOICEOFAMERICA_FULL_TESTING})
+if (%ENV && exists ($ENV{TEXT_CORPUS_VOICEOFAMERICA_FULL_TESTING}) && $ENV{TEXT_CORPUS_VOICEOFAMERICA_FULL_TESTING})
 {
     diag ("\nTesting with network access.\n");
 
