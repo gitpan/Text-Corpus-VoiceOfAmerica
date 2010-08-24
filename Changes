@@ -11,3 +11,7 @@ Revision history for Perl module Text::Corpus::VoiceOfAmerica
     - Fixed encoding and parsing errors.
     - Removed defined on hash.
     - Minor improvements to the documentation.
+
+1.03
+	- Added HTML::Encoding to Makefile.PL.
+	- Addd no warnings around encoding_from_html_document.

@@ -22,7 +22,7 @@ use Data::Dump qw(dump);
 BEGIN {
     use Exporter ();
     use vars qw($VERSION @ISA @EXPORT @EXPORT_OK %EXPORT_TAGS);
-    $VERSION     = '1.02';
+    $VERSION     = '1.03';
     @ISA         = qw(Exporter);
     @EXPORT      = qw();
     @EXPORT_OK   = qw();
@@ -763,8 +763,13 @@ sub _getArticle
     }
 
     # return its contents, decoded.
-    my $encoding = encoding_from_html_document($pageContents, xhtml => 0);
-    $encoding = encoding_from_html_document($pageContents, xhtml => 1) unless defined $encoding;
+    my $encoding;
+    {
+      no warnings;
+      $encoding = encoding_from_html_document($pageContents, xhtml => 0);
+      $encoding = encoding_from_html_document($pageContents, xhtml => 1) unless defined $encoding;
+    }
+
     unless (defined $encoding)
     {
       my $logger = Log::Log4perl->get_logger();
@@ -811,8 +816,13 @@ sub _getArticle
   $Self->{urlsInCache}->{$url} = 1;
 
   # return its contents, decoded.
-  my $encoding = encoding_from_html_document($pageContents, xhtml => 0);
-  $encoding = encoding_from_html_document($pageContents, xhtml => 1) unless defined $encoding;
+  my $encoding;
+  {
+    no warnings;
+    $encoding = encoding_from_html_document($pageContents, xhtml => 0);
+    $encoding = encoding_from_html_document($pageContents, xhtml => 1) unless defined $encoding;
+  }
+
   unless (defined $encoding)
   {
     my $logger = Log::Log4perl->get_logger();
